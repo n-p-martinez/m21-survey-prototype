@@ -5,9 +5,10 @@ import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import express, { type Request, type Response } from 'express';
 import multer from 'multer';
-import { applyRoutes, planRoutes, runChecks } from '../shared/build';
+import { applyPatch, applyRebuild, applyReview, applyRoutesEdit, applyRules, applyVerdict } from '../shared/actions';
+import { runChecks } from '../shared/build';
 import { toCsv } from '../shared/export';
-import { LDAR_TYPES, type Component, type LdarType, type Project, type Route } from '../shared/types';
+import type { Project, Route } from '../shared/types';
 import { aiConfigured, askRecord, MODEL } from './ai';
 import { runPipeline } from './pipeline';
 import { parseAnalysis, sha256File, type AnalysisFile } from './replay';
@@ -125,26 +126,7 @@ app.get('/api/projects/:id/files/*rest', (req, res) => {
 // A technician's verdict on one proposal. Every verdict is kept and fed back to the model as an example.
 app.post('/api/projects/:id/components/:cid/verdict', (req, res) =>
   withProject(req, res, async (p) => {
-    const c = p.components.find((x) => x.id === req.params.cid);
-    if (!c) throw new Error('No such component.');
-    const verdict = req.body.verdict as 'confirmed' | 'corrected' | 'rejected';
-    if (!['confirmed', 'corrected', 'rejected'].includes(verdict)) throw new Error('Unknown verdict.');
-    const before = c.type;
-    const newType = req.body.type as LdarType | undefined;
-    if (newType && !LDAR_TYPES.includes(newType)) throw new Error('Unknown component type.');
-    if (verdict === 'corrected') {
-      if (newType) c.type = newType;
-      if (typeof req.body.equipmentName === 'string') c.equipmentName = req.body.equipmentName.slice(0, 120);
-      if (typeof req.body.locationDescription === 'string') c.locationDescription = req.body.locationDescription.slice(0, 240);
-    }
-    c.status = verdict;
-    c.verifiedBy = role(req);
-    await addCorrection({ at: now(), householdName: c.householdName, proposedType: before, finalType: c.type, proposedConfidence: c.confidence, verdict, note: String(req.body.note ?? '').slice(0, 200) });
-    if (verdict === 'rejected') {
-      for (const r of p.routes) r.componentIds = r.componentIds.filter((id) => id !== c.id);
-      applyRoutes(p.components, p.routes);
-    }
-    p.log.push({ at: now(), who: role(req), what: `${verdict[0].toUpperCase() + verdict.slice(1)} ${c.tag} ${c.equipmentId}${verdict === 'corrected' && before !== c.type ? `, type ${before} to ${c.type}` : ''}.` });
+    await addCorrection(applyVerdict(p, String(req.params.cid), role(req), req.body));
     await saveProject(p);
     emit(p);
     return p;
@@ -154,15 +136,7 @@ app.post('/api/projects/:id/components/:cid/verdict', (req, res) =>
 // Field edits that are not a verdict: difficult to monitor, pin position on the plan.
 app.patch('/api/projects/:id/components/:cid', (req, res) =>
   withProject(req, res, async (p) => {
-    const c = p.components.find((x) => x.id === req.params.cid);
-    if (!c) throw new Error('No such component.');
-    const changes: string[] = [];
-    const set = <K extends keyof Component>(k: K, v: Component[K], label: string) => { c[k] = v; changes.push(label); };
-    if (typeof req.body.difficultToMonitor === 'boolean') set('difficultToMonitor', req.body.difficultToMonitor, `difficult to monitor ${req.body.difficultToMonitor ? 'on' : 'off'}`);
-    if (typeof req.body.unsafeToMonitor === 'boolean') set('unsafeToMonitor', req.body.unsafeToMonitor, `unsafe to monitor ${req.body.unsafeToMonitor ? 'on' : 'off'}`);
-    if (req.body.plan && typeof req.body.plan.x === 'number') set('plan', { x: Math.min(1, Math.max(0, req.body.plan.x)), y: Math.min(1, Math.max(0, req.body.plan.y)) }, 'pin moved');
-    if (typeof req.body.locationDescription === 'string') set('locationDescription', req.body.locationDescription.slice(0, 240), 'location described');
-    p.log.push({ at: now(), who: role(req), what: `${c.tag}: ${changes.join(', ')}.` });
+    applyPatch(p, String(req.params.cid), role(req), req.body);
     await saveProject(p);
     emit(p);
     return p;
@@ -172,22 +146,7 @@ app.patch('/api/projects/:id/components/:cid', (req, res) =>
 // The project manager's route edits: order, moves between routes, splits, merges, names.
 app.put('/api/projects/:id/routes', (req, res) =>
   withProject(req, res, async (p) => {
-    const routes = req.body.routes as Route[];
-    if (!Array.isArray(routes)) throw new Error('Send the full list of routes.');
-    const ids = new Set(p.components.map((c) => c.id));
-    const seen = new Set<string>();
-    for (const r of routes) {
-      if (!/^[A-Za-z0-9-]{2,24}$/.test(r.id)) throw new Error(`Route ID "${r.id}" must be 2 to 24 letters, digits or dashes.`);
-      for (const cid of r.componentIds) {
-        if (!ids.has(cid)) throw new Error('A route names a component that does not exist.');
-        if (seen.has(cid)) throw new Error('A component is on two routes.');
-        seen.add(cid);
-      }
-    }
-    if (new Set(routes.map((r) => r.id)).size !== routes.length) throw new Error('Two routes share an ID.');
-    p.routes = routes.filter((r) => r.componentIds.length).map((r) => ({ id: r.id, name: String(r.name).slice(0, 80), frequency: r.frequency, componentIds: r.componentIds }));
-    applyRoutes(p.components, p.routes);
-    p.log.push({ at: now(), who: role(req), what: String(req.body.note ?? 'Edited routes.').slice(0, 200) });
+    applyRoutesEdit(p, req.body.routes as Route[], role(req), String(req.body.note ?? ''));
     await saveProject(p);
     emit(p);
     return p;
@@ -196,10 +155,7 @@ app.put('/api/projects/:id/routes', (req, res) =>
 
 app.post('/api/projects/:id/routes/rebuild', (req, res) =>
   withProject(req, res, async (p) => {
-    if (!p.survey) throw new Error('No survey yet.');
-    if (typeof req.body.capacity === 'number') p.routeCapacity = Math.max(2, Math.min(500, Math.round(req.body.capacity)));
-    p.routes = planRoutes(p.components, p.survey, p.routeCapacity);
-    p.log.push({ at: now(), who: role(req), what: `Rebuilt the ideal routes at ${p.routeCapacity} components per route.` });
+    applyRebuild(p, role(req), typeof req.body.capacity === 'number' ? req.body.capacity : undefined);
     await saveProject(p);
     emit(p);
     return p;
@@ -208,11 +164,7 @@ app.post('/api/projects/:id/routes/rebuild', (req, res) =>
 
 app.post('/api/projects/:id/review', (req, res) =>
   withProject(req, res, async (p) => {
-    const stage = req.body.stage as Project['review'];
-    if (!['draft', 'in_review', 'approved'].includes(stage)) throw new Error('Unknown review stage.');
-    if (stage === 'approved' && p.components.some((c) => c.status === 'proposed')) throw new Error('Every proposal must be confirmed, corrected or rejected before approval.');
-    p.review = stage;
-    p.log.push({ at: now(), who: role(req), what: { draft: 'Returned to draft.', in_review: 'Sent for QA review.', approved: 'Approved into the record.' }[stage] });
+    applyReview(p, req.body.stage as Project['review'], role(req));
     await saveProject(p);
     emit(p);
     return p;
@@ -221,8 +173,7 @@ app.post('/api/projects/:id/review', (req, res) =>
 
 app.put('/api/projects/:id/rules', (req, res) =>
   withProject(req, res, async (p) => {
-    p.ruleOverrides = req.body.overrides ?? {};
-    p.log.push({ at: now(), who: role(req), what: 'Changed rule values in the test area.' });
+    applyRules(p, req.body.overrides ?? {}, role(req));
     await saveProject(p);
     emit(p);
     return p;

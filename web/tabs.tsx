@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { runChecks } from '../shared/build';
 import { FEDERAL_RULES } from '../shared/rules';
 import { LDAR_TYPE_LABEL, LDAR_TYPES, type Component, type LdarType, type Project, type Route } from '../shared/types';
-import { api } from './api';
+import { api, exportCsv, saveFile, STATIC } from './api';
 import { Confidence, PlanView, STATUS_COLOR, STATUS_LABEL } from './views';
 
 type Act = (fn: () => Promise<Project>) => Promise<void>;
@@ -292,6 +292,7 @@ export function AskTab({ p }: { p: Project }) {
   };
   return (
     <div className="col" style={{ gap: 12, maxWidth: 900 }}>
+      {STATIC && <p className="chip warn" style={{ whiteSpace: 'normal' }}>Ask the record needs a Claude API key, so it is off on this page. In the app with a key, questions are answered from this inventory.</p>}
       <form className="row" onSubmit={(e) => { e.preventDefault(); void ask(q); }}>
         <input id="ask" type="text" value={q} placeholder="Ask about this inventory in plain language" onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 260 }} />
         <button className="btn" disabled={busy}>{busy ? 'Asking' : 'Ask'}</button>
@@ -306,7 +307,18 @@ export function AskTab({ p }: { p: Project }) {
 
 export function SheetTab({ p }: { p: Project }) {
   const [only, setOnly] = useState<string>('all');
+  const [msg, setMsg] = useState('');
   const routes = p.routes.filter((r) => only === 'all' || r.id === only);
+  const safe = p.name.replace(/[^A-Za-z0-9-]+/g, '_');
+  const sheetHtml = () => {
+    const sheets = [...document.querySelectorAll('.sheet')].map((e) => e.outerHTML).join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${safe} route sheets</title><style>
+body{font-family:Inter,Arial,sans-serif;margin:0;color:#000}.sheet{padding:16px;page-break-after:always}h2{font-size:18px;margin:0}
+.row{display:flex;justify-content:space-between;align-items:center}table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{border:1px solid #999;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}
+.hdr{display:grid;grid-template-columns:repeat(4,1fr);gap:6px 16px;font-size:12px;margin:10px 0}.hdr span{border-bottom:1px solid #999;padding-bottom:2px}
+@page{size:letter landscape;margin:.4in}</style></head><body>${sheets}</body></html>`;
+  };
   const byId = new Map(p.components.map((c) => [c.id, c]));
   const rule = (c: Component) => ({ ...FEDERAL_RULES[c.type], ...(p.ruleOverrides[c.type] ?? {}) });
   return (
@@ -319,11 +331,14 @@ export function SheetTab({ p }: { p: Project }) {
               {p.routes.map((r) => <option key={r.id} value={r.id}>{r.id} · {r.name}</option>)}
             </select>
           </label>
-          <button className="btn" onClick={() => print()}>Print route sheet</button>
+          {STATIC
+            ? <button className="btn" onClick={async () => setMsg(await saveFile(`${safe}_route_sheets.html`, sheetHtml(), 'text/html'))}>Download route sheet to print</button>
+            : <button className="btn" onClick={() => print()}>Print route sheet</button>}
         </div>
         <div className="row">
-          <a className="btn secondary" href={`/api/projects/${p.id}/export.csv`}>Download CSV</a>
-          <a className="btn secondary" href={`/api/projects/${p.id}/export.json`}>Download JSON</a>
+          <button className="btn secondary" onClick={async () => setMsg(await saveFile(`${safe}_inventory.csv`, exportCsv(p), 'text/csv', api.csvUrl(p.id)))}>Download CSV</button>
+          <button className="btn secondary" onClick={async () => setMsg(await saveFile(`${safe}_inventory.json`, JSON.stringify({ name: p.name, survey: p.survey, routes: p.routes, components: p.components, log: p.log }, null, 2), 'application/json', api.jsonUrl(p.id)))}>Download JSON</button>
+          {msg && <span className="small muted" aria-live="polite">{msg}</span>}
           <span className="small muted">Columns follow Onterris's own layout until a Skybridge sample arrives.</span>
         </div>
       </div>

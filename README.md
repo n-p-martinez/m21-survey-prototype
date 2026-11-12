@@ -27,6 +27,10 @@ If you cannot get a Claude API key, the analysis can be run elsewhere and replay
 
 Everything from review onward is live. Ask the record needs a key and is off without one.
 
+### As a claude.ai page
+
+`npm run build-static -- data/projects/<id> <outDir>` packages one finished project as a static page: the app with its scripts inlined, plus the project JSON, survey image, frames and the video (if 15 MB or less). Published as a claude.ai artifact, it opens in any browser with no install. Review, routes, checks, the rule test area, the route sheet and the CSV work in the page; changes are kept in that browser only. Uploading a new survey and Ask the record need the server.
+
 Survey drawings, videos, frames and every AI result are written to `data/`, which git ignores. Delete that folder to start clean.
 
 ## What it does

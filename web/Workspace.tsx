@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Project } from '../shared/types';
-import { api } from './api';
+import { api, resetStatic, STATIC } from './api';
 import { AskTab, ChecksTab, ReviewTab, RoutesTab, RulesTab, SheetTab } from './tabs';
 import { PlanView, VideoView } from './views';
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 const TABS = [
   { id: 'review', label: 'Review proposals' },
@@ -20,12 +22,25 @@ export function Workspace({ id, role }: { id: string; role: string }) {
   const [tab, setTab] = useState<TabId>('review');
   const [selected, setSelected] = useState<string | null>(null);
 
+  const [replayAt, setReplayAt] = useState<number | null>(null);
+
   useEffect(() => {
-    api.get(id).then(setP).catch((e) => setError(e.message));
+    api.get(id).then((x) => { setP(x); if (STATIC && x.replay) setReplayAt(0); }).catch((e) => setError(e.message));
+    if (STATIC) return;
     const es = new EventSource(`/api/projects/${id}/events`);
     es.onmessage = (m) => setP(JSON.parse(m.data));
     return () => es.close();
   }, [id]);
+
+  // On the claude.ai page, walk through the recorded analysis step by step before opening the results.
+  const batches = p ? Math.ceil(p.frames.length / 8) : 0;
+  const replaySteps = p ? 3 + batches : 0;
+  useEffect(() => {
+    if (replayAt === null || !p) return;
+    if (replayAt >= replaySteps) { const t = setTimeout(() => setReplayAt(null), 900); return () => clearTimeout(t); }
+    const t = setTimeout(() => setReplayAt(replayAt + 1), replayAt < 2 ? 1800 : replayAt < 2 + batches ? 700 : 1800);
+    return () => clearTimeout(t);
+  }, [replayAt, p, replaySteps, batches]);
 
   const sel = useMemo(() => p?.components.find((c) => c.id === selected) ?? null, [p, selected]);
   const act = async (fn: () => Promise<Project>) => {
@@ -34,6 +49,38 @@ export function Workspace({ id, role }: { id: string; role: string }) {
   };
 
   if (!p) return <div className="page"><p className="muted">{error || 'Loading'}</p></div>;
+
+  if (replayAt !== null) {
+    const labels = ['Read the survey', 'Sample the video', 'Find components', 'Merge sightings', 'Build tags and routes'];
+    const at = replayAt < 1 ? 0 : replayAt < 2 ? 1 : replayAt < 2 + batches ? 2 : replayAt < 3 + batches ? 3 : 4;
+    const shown = p.frames.slice(0, Math.min(p.frames.length, Math.max(0, replayAt - 1) * 8));
+    return (
+      <div className="page">
+        <div className="card col" style={{ maxWidth: 900, gap: 14 }}>
+          <h1>{p.name}</h1>
+          <p className="chip warn" style={{ whiteSpace: 'normal' }}>Replaying the analysis run on {new Date(p.replay!.ranAt).toLocaleDateString()} by {p.replay!.ranBy}. Every result shown is that run's real output.</p>
+          <div className="steps">
+            {labels.map((l, i) => (
+              <div key={l} className="s">
+                <span className="dot" style={{ background: i < at ? '#2f7d32' : i === at ? '#5294eb' : '#e3e6ea' }} />
+                <span style={{ fontWeight: i === at ? 600 : 400 }}>{l}</span>
+                {i === 0 && at > 0 && <span className="small muted">{plural(p.survey?.areas.length ?? 0, 'area')}, {plural(p.survey?.referencePoints.length ?? 0, 'reference point')}, {plural(p.survey?.redactions.length ?? 0, 'personal detail')} hidden</span>}
+                {i === 1 && at > 1 && <span className="small muted">{p.frames.length} frames</span>}
+                {i === 2 && at >= 2 && <span className="small muted">batch {Math.min(batches, Math.max(0, replayAt - 1))} of {batches}</span>}
+                {i === 3 && at > 3 && <span className="small muted">{p.components.length} components</span>}
+                {i === 4 && at >= 4 && <span className="small muted">{p.routes.length} routes</span>}
+              </div>
+            ))}
+          </div>
+          <div className="progress"><i style={{ width: `${(Math.min(replayAt, replaySteps) / Math.max(1, replaySteps)) * 100}%` }} /></div>
+          <div className="row" style={{ gap: 6 }}>
+            {shown.slice(-16).map((f) => <img key={f.file} src={api.file(p.id, f.file)} alt="" style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 4, filter: 'blur(1px)' }} />)}
+          </div>
+          <button className="btn secondary" style={{ alignSelf: 'flex-start' }} onClick={() => setReplayAt(null)}>Skip to the results</button>
+        </div>
+      </div>
+    );
+  }
 
   if (p.stage !== 'ready') {
     const order = ['survey', 'frames', 'detect', 'consolidate', 'build'];
@@ -78,6 +125,8 @@ export function Workspace({ id, role }: { id: string; role: string }) {
           <span className="muted small">{counts.total} components proposed · {p.routes.length} routes · {counts.proposed} awaiting a technician · working as {role}</span>
         </div>
         <div className="row">
+          {STATIC && p.replay && <button className="btn secondary small" onClick={() => setReplayAt(0)}>Replay the analysis</button>}
+          {STATIC && <button className="btn secondary small" title="Undo every change made in this browser" onClick={() => act(async () => (await resetStatic())!)}>Reset my changes</button>}
           <span className={`chip ${p.review === 'approved' ? 'ok' : p.review === 'in_review' ? 'warn' : ''}`}>{{ draft: 'Draft', in_review: 'In QA review', approved: 'Approved into the record' }[p.review]}</span>
           {p.review === 'draft' && <button className="btn secondary" onClick={() => act(() => api.review(p.id, 'in_review'))}>Send for QA review</button>}
           {p.review === 'in_review' && <>

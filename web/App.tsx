@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Project } from '../shared/types';
-import { api, currentRole, ROLE_KEY } from './api';
+import { api, currentRole, ROLE_KEY, STATIC } from './api';
 import { NewSurvey } from './NewSurvey';
 import { Workspace } from './Workspace';
 
@@ -8,6 +8,7 @@ const ROLES = ['Documenter', 'Monitoring technician', 'QA person', 'Project mana
 
 export function App() {
   const [hash, setHash] = useState(location.hash.slice(1));
+  const [staticId, setStaticId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ aiConfigured: boolean; model: string } | null>(null);
   const [list, setList] = useState<Awaited<ReturnType<typeof api.list>>>([]);
   const [role, setRole] = useState(currentRole());
@@ -16,6 +17,7 @@ export function App() {
     const on = () => setHash(location.hash.slice(1));
     addEventListener('hashchange', on);
     api.status().then(setStatus).catch(() => setStatus(null));
+    if (STATIC) api.get('').then((p) => setStaticId(p.id)).catch(() => setStaticId(null));
     api.list().then(setList).catch(() => setList([]));
     return () => removeEventListener('hashchange', on);
   }, [hash]);
@@ -36,9 +38,10 @@ export function App() {
       </div>
       <div className="banner noprint">
         Prototype with stand-in data: a house survey and walkthrough video, with household items treated as LDAR components. Federal rule values are orientation only.
-        {status && !status.aiConfigured && <strong> No API key on this server: prepared analyses replay, live analysis and Ask the record are off.</strong>}
+        {status && !status.aiConfigured && !STATIC && <strong> No API key on this server: prepared analyses replay, live analysis and Ask the record are off.</strong>}
+        {STATIC && <strong> This page holds one prepared survey. Your changes are kept in this browser only.</strong>}
       </div>
-      {hash ? <Workspace id={hash} role={role} /> : (
+      {STATIC ? (staticId ? <Workspace id={staticId} role={role} /> : <div className="page"><p className="muted">Loading the survey</p></div>) : hash ? <Workspace id={hash} role={role} /> : (
         <div className="page">
           <NewSurvey onCreated={open} aiReady={Boolean(status?.aiConfigured)} />
           {list.length > 0 && (
