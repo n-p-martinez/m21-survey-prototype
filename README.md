@@ -64,6 +64,7 @@ Draft, In QA review and Approved into the record track the review stage. Nothing
 | `server/video.ts` | ffmpeg frame sampling |
 | `server/index.ts` | The HTTP API |
 | `web/` | The React app, in the Onterris design system's colors and type |
+| `docs/large-facilities.md` | How this scales from one plot plan to a facility drawing set |
 
 ## Known limits
 
