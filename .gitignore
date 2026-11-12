@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+# Survey drawings, videos, frames and AI output stay on the machine that ran them.
+data/
+*.mp4
+*.mov
+*.pdf
