@@ -36,7 +36,7 @@ export function App() {
       </div>
       <div className="banner noprint">
         Prototype with stand-in data: a house survey and walkthrough video, with household items treated as LDAR components. Federal rule values are orientation only.
-        {status && !status.aiConfigured && <strong> The server has no ANTHROPIC_API_KEY, so new surveys cannot be analysed.</strong>}
+        {status && !status.aiConfigured && <strong> No API key on this server: prepared analyses replay, live analysis and Ask the record are off.</strong>}
       </div>
       {hash ? <Workspace id={hash} role={role} /> : (
         <div className="page">

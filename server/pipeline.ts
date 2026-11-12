@@ -6,7 +6,8 @@ import { buildInventory, type Proposal } from '../shared/build';
 import type { Project, SurveyModel } from '../shared/types';
 import { detectInFrames, mergeObservations, readSurvey, type Observations } from './ai';
 import { loadCorrections, projectDir, saveProject } from './store';
-import { extractFrames } from './video';
+import type { AnalysisFile } from './replay';
+import { extractFramesAt, frameTimes } from './video';
 
 const BATCH = 8;          // frames per detection call
 const PARALLEL = 3;       // detection calls at once
@@ -21,35 +22,39 @@ async function step(p: Project, emit: Emit, stage: Project['stage'], stepName: s
   emit(p);
 }
 
-export async function runPipeline(p: Project, emit: Emit): Promise<void> {
+/** Live runs call Claude. A replay returns the recorded answers in the same order, paced so the steps can be watched. */
+export async function runPipeline(p: Project, emit: Emit, recorded?: AnalysisFile): Promise<void> {
   const dir = projectDir(p.id);
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, recorded ? ms : 0));
   try {
     // 1. Survey
     await step(p, emit, 'survey', 'Reading the survey', 0, 1, 'Finding areas, reference points and personal details to hide');
-    const pdf = (await readFile(path.join(dir, 'survey.pdf'))).toString('base64');
-    const png = (await readFile(path.join(dir, p.survey!.pageImage))).toString('base64');
-    const s = await readSurvey(pdf, png);
+    const pdf = recorded ? '' : (await readFile(path.join(dir, 'survey.pdf'))).toString('base64');
+    const png = recorded ? '' : (await readFile(path.join(dir, p.survey!.pageImage))).toString('base64');
+    const s = recorded ? (await pause(2500), recorded.survey) : await readSurvey(pdf, png);
     const survey: SurveyModel = { ...p.survey!, ...s };
     p.survey = survey;
     p.log.push({ at: new Date().toISOString(), who: 'AI', what: `Read the survey: ${s.areas.length} areas, ${s.referencePoints.length} reference points, ${s.redactions.length} personal details hidden.` });
 
     // 2. Frames
     await step(p, emit, 'frames', 'Sampling the video', 0, 1, 'Pulling frames with ffmpeg');
-    const maxFrames = Number(process.env.M21_MAX_FRAMES ?? 120);
-    p.frames = await extractFrames(path.join(dir, p.video!.file), path.join(dir, 'frames'), p.video!.duration, maxFrames);
-
-    // 3. Detection, in batches, with technician corrections as examples
-    const examples = (await loadCorrections()).slice(-30);
+    const times = recorded ? recorded.frameTimes : frameTimes(p.video!.duration, Number(process.env.M21_MAX_FRAMES ?? 120));
+    p.frames = await extractFramesAt(path.join(dir, p.video!.file), path.join(dir, 'frames'), times);
+    const examples = recorded ? [] : (await loadCorrections()).slice(-30);
     const batches: number[][] = [];
     for (let i = 0; i < p.frames.length; i += BATCH) batches.push(p.frames.slice(i, i + BATCH).map((_, j) => i + j));
     const all: (Observations['observations'][number] & { frame: number })[] = [];
     const privacy: { frame: number; box: { x: number; y: number; w: number; h: number } }[] = [];
     let finished = 0;
     await step(p, emit, 'detect', 'Finding components', 0, batches.length, `${p.frames.length} frames in ${batches.length} batches`);
+    if (recorded && recorded.batches.length !== batches.length) throw new Error('The analysis file does not match this video\'s frame batches.');
     for (let i = 0; i < batches.length; i += PARALLEL) {
-      await Promise.all(batches.slice(i, i + PARALLEL).map(async (idx) => {
-        const frames = await Promise.all(idx.map(async (k) => ({ b64: (await readFile(path.join(dir, p.frames[k].file))).toString('base64'), t: p.frames[k].t })));
-        const r = await detectInFrames(frames, survey, examples);
+      await Promise.all(batches.slice(i, i + PARALLEL).map(async (idx, j) => {
+        const r = recorded
+          ? (await pause(900 + 300 * j), recorded.batches[i + j])
+          : await detectInFrames(
+            await Promise.all(idx.map(async (k) => ({ b64: (await readFile(path.join(dir, p.frames[k].file))).toString('base64'), t: p.frames[k].t }))),
+            survey, examples);
         for (const o of r.observations) if (idx[o.frameIndex] !== undefined) all.push({ ...o, frame: idx[o.frameIndex] });
         for (const q of r.privacy) if (idx[q.frameIndex] !== undefined) privacy.push({ frame: idx[q.frameIndex], box: q.box });
         finished += 1;
@@ -60,7 +65,7 @@ export async function runPipeline(p: Project, emit: Emit): Promise<void> {
 
     // 4. Merge sightings into components
     await step(p, emit, 'consolidate', 'Merging sightings', 0, 1, `${all.length} sightings into components`);
-    const merged = await mergeObservations(
+    const merged = recorded ? (await pause(2500), recorded.merged) : await mergeObservations(
       all.map((o, id) => ({ id, t: p.frames[o.frame].t, householdName: o.householdName, type: o.type, equipmentName: o.equipmentName, areaId: o.areaId, nearReferenceId: o.nearReferenceId, locationDescription: o.locationDescription, confidence: o.confidence, sizeInches: o.sizeInches })),
       survey,
     );
@@ -88,7 +93,7 @@ export async function runPipeline(p: Project, emit: Emit): Promise<void> {
     const built = buildInventory(proposals, survey, p.routeCapacity);
     p.components = built.components;
     p.routes = built.routes;
-    p.log.push({ at: new Date().toISOString(), who: 'AI', what: `Proposed ${proposals.length} components on ${built.routes.length} routes from ${p.frames.length} frames.` });
+    p.log.push({ at: new Date().toISOString(), who: 'AI', what: `Proposed ${proposals.length} components on ${built.routes.length} routes from ${p.frames.length} frames${recorded ? `, replayed from the analysis run on ${recorded.ranAt.slice(0, 10)}` : ''}.` });
     await step(p, emit, 'ready', 'Ready for review', 1, 1, 'Every proposal needs a technician to confirm or correct it');
   } catch (e) {
     p.stage = 'error';

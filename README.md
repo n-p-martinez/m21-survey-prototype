@@ -17,6 +17,16 @@ npm run dev
 
 Open http://localhost:5173. To run the built version on one port instead: `npm start`, then http://localhost:8787.
 
+### Without an API key: replay a prepared analysis
+
+If you cannot get a Claude API key, the analysis can be run elsewhere and replayed:
+
+1. Run `npm run prepare-analysis -- <video> <outDir>`. It hashes the video, picks the frame times a live run would use and pulls those frames.
+2. The analysis (the survey reading, one detection result per 8-frame batch, and the merge) is written to an `analysis.json` in the format `server/replay.ts` checks.
+3. In the app, add that file under **Prepared analysis** next to the same survey and video. The app checks the video matches, pulls the same frames, and replays each step in order with a banner saying when and by whom the analysis was run.
+
+Everything from review onward is live. Ask the record needs a key and is off without one.
+
 Survey drawings, videos, frames and every AI result are written to `data/`, which git ignores. Delete that folder to start clean.
 
 ## What it does

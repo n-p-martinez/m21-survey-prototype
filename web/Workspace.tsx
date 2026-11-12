@@ -43,6 +43,7 @@ export function Workspace({ id, role }: { id: string; role: string }) {
       <div className="page">
         <div className="card col" style={{ maxWidth: 640, gap: 14 }}>
           <h1>{p.name}</h1>
+          {p.replay && <p className="chip warn" style={{ whiteSpace: 'normal' }}>Replaying the analysis run on {new Date(p.replay.ranAt).toLocaleDateString()} by {p.replay.ranBy}. Every result shown is that run's real output.</p>}
           {p.stage === 'error' ? (
             <p className="chip bad" style={{ whiteSpace: 'normal' }}>Stopped: {p.error}</p>
           ) : (
@@ -86,6 +87,7 @@ export function Workspace({ id, role }: { id: string; role: string }) {
         </div>
       </div>
       {error && <p className="chip bad noprint" role="alert" style={{ whiteSpace: 'normal' }}>{error}</p>}
+      {p.replay && <p className="small muted noprint">AI proposals replayed from the analysis run on {new Date(p.replay.ranAt).toLocaleDateString()} by {p.replay.ranBy}. {p.replay.note} Everything from review onward is live.</p>}
 
       {tab !== 'sheet' && (
         <div className="grid2 noprint">

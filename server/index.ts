@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, rename } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import express, { type Request, type Response } from 'express';
 import multer from 'multer';
@@ -10,6 +10,7 @@ import { toCsv } from '../shared/export';
 import { LDAR_TYPES, type Component, type LdarType, type Project, type Route } from '../shared/types';
 import { aiConfigured, askRecord, MODEL } from './ai';
 import { runPipeline } from './pipeline';
+import { parseAnalysis, sha256File, type AnalysisFile } from './replay';
 import { addCorrection, DATA_DIR, listProjects, loadProject, projectDir, saveProject } from './store';
 import { probe } from './video';
 
@@ -42,11 +43,17 @@ app.get('/api/projects', async (_req, res) => res.json(await listProjects()));
 
 app.post(
   '/api/projects',
-  upload.fields([{ name: 'survey', maxCount: 1 }, { name: 'surveyPage', maxCount: 1 }, { name: 'video', maxCount: 1 }]),
+  upload.fields([{ name: 'survey', maxCount: 1 }, { name: 'surveyPage', maxCount: 1 }, { name: 'video', maxCount: 1 }, { name: 'analysis', maxCount: 1 }]),
   async (req, res) => {
     try {
-      if (!aiConfigured()) throw new Error('ANTHROPIC_API_KEY is not set on the server, so nothing can be analysed yet.');
       const files = req.files as Record<string, Express.Multer.File[]>;
+      let recorded: AnalysisFile | undefined;
+      if (files.analysis?.[0]) {
+        recorded = parseAnalysis(await readFile(files.analysis[0].path, 'utf8'));
+        await rm(files.analysis[0].path, { force: true });
+      } else if (!aiConfigured()) {
+        throw new Error('This server has no ANTHROPIC_API_KEY. Add the prepared analysis file to replay a recorded analysis instead.');
+      }
       const survey = files.survey?.[0];
       const page = files.surveyPage?.[0];
       const video = files.video?.[0];
@@ -59,6 +66,10 @@ app.post(
       await rename(page.path, path.join(dir, 'survey.png'));
       await rename(video.path, path.join(dir, `video${ext}`));
       const meta = await probe(path.join(dir, `video${ext}`));
+      if (recorded && (await sha256File(path.join(dir, `video${ext}`))) !== recorded.video.sha256) {
+        await rm(dir, { recursive: true, force: true });
+        throw new Error('This analysis was made from a different video. Upload the same video file it was made from.');
+      }
       const p: Project = {
         id,
         name: String(req.body.name || 'Untitled survey').slice(0, 80),
@@ -79,10 +90,11 @@ app.post(
         log: [{ at: now(), who: role(req), what: 'Uploaded the survey and the video.' }],
         routeCapacity: Math.max(2, Math.min(500, Number(req.body.capacity) || 12)),
         ruleOverrides: {},
+        replay: recorded ? { ranAt: recorded.ranAt, ranBy: recorded.ranBy, note: recorded.note } : null,
       };
       await saveProject(p);
       res.json(p);
-      void runPipeline(p, emit);
+      void runPipeline(p, emit, recorded);
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -221,6 +233,7 @@ app.get('/api/projects/:id/checks', (req, res) => withProject(req, res, (p) => r
 
 app.post('/api/projects/:id/ask', (req, res) =>
   withProject(req, res, async (p) => {
+    if (!aiConfigured()) throw new Error('Ask the record needs ANTHROPIC_API_KEY on the server. It is off in replay-only setups.');
     const q = String(req.body.question ?? '').trim().slice(0, 500);
     if (!q) throw new Error('Ask a question.');
     const inventory = {

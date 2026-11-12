@@ -119,6 +119,8 @@ export interface Project {
   review: 'draft' | 'in_review' | 'approved';
   log: ChangeEntry[];
   routeCapacity: number;
+  /** Set when the analysis was replayed from a recorded file instead of run live. */
+  replay: { ranAt: string; ranBy: string; note: string } | null;
   ruleOverrides: Partial<Record<LdarType, { leakPpm?: number | null; frequency?: string }>>;
 }
 

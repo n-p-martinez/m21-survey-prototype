@@ -1,8 +1,8 @@
 // Frame sampling with ffmpeg. Short clips get a frame every 2 seconds; long videos are spread evenly
-// across the whole length up to M21_MAX_FRAMES, so a 40 minute walk costs the same as a 4 minute one.
+// across the whole length up to M21_MAX_FRAMES, so a 40 minute walk costs about the same as a 4 minute one.
 
 import { spawn } from 'node:child_process';
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const run = (cmd: string, args: string[]) =>
@@ -26,12 +26,22 @@ export function frameInterval(duration: number, maxFrames: number): number {
   return Math.max(2, duration / maxFrames);
 }
 
-export async function extractFrames(file: string, outDir: string, duration: number, maxFrames: number): Promise<{ file: string; t: number }[]> {
-  await mkdir(outDir, { recursive: true });
+/** The times a run samples: every 2 seconds, or spread evenly across a long video. Shared by live runs and recorded analyses. */
+export function frameTimes(duration: number, maxFrames: number): number[] {
   const step = frameInterval(duration, maxFrames);
-  // Damaged stretches are skipped instead of stopping the run, as with the 11/03 recording.
-  await run('ffmpeg', ['-v', 'error', '-err_detect', 'ignore_err', '-fflags', '+discardcorrupt', '-i', file,
-    '-vf', `fps=1/${step.toFixed(3)},scale='min(1280,iw)':-2`, '-q:v', '4', '-y', path.join(outDir, 'f_%04d.jpg')]);
-  const files = (await readdir(outDir)).filter((f) => f.startsWith('f_')).sort();
-  return files.map((f, i) => ({ file: `frames/${f}`, t: Math.min(duration, i * step + step / 2) }));
+  const out: number[] = [];
+  for (let t = step / 2; t < duration && out.length < maxFrames; t += step) out.push(Math.round(t * 100) / 100);
+  return out;
+}
+
+/** Pull one frame at each given time. Exact times keep a recorded analysis valid across ffmpeg versions. */
+export async function extractFramesAt(file: string, outDir: string, times: number[]): Promise<{ file: string; t: number }[]> {
+  await mkdir(outDir, { recursive: true });
+  const out: { file: string; t: number }[] = [];
+  for (let i = 0; i < times.length; i++) {
+    const name = `f_${String(i + 1).padStart(4, '0')}.jpg`;
+    await run('ffmpeg', ['-v', 'error', '-ss', times[i].toFixed(2), '-i', file, '-frames:v', '1', '-vf', "scale='min(1280,iw)':-2", '-q:v', '4', '-y', path.join(outDir, name)]);
+    out.push({ file: `frames/${name}`, t: times[i] });
+  }
+  return out;
 }

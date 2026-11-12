@@ -9,6 +9,7 @@
     "build": "vite build",
     "start": "npm run build && cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepare-analysis": "tsx scripts/prepare-analysis.ts",
     "test": "tsx --test shared/*.test.ts"
   },
   "dependencies": {

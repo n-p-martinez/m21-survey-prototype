@@ -25,6 +25,7 @@ export function NewSurvey({ onCreated, aiReady }: { onCreated: (p: Project) => v
   const [name, setName] = useState('Stand-in facility, survey 1');
   const [survey, setSurvey] = useState<File | null>(null);
   const [video, setVideo] = useState<File | null>(null);
+  const [analysis, setAnalysis] = useState<File | null>(null);
   const [capacity, setCapacity] = useState(12);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -43,6 +44,7 @@ export function NewSurvey({ onCreated, aiReady }: { onCreated: (p: Project) => v
       form.append('survey', survey);
       form.append('surveyPage', page.blob, 'survey.png');
       form.append('video', video);
+      if (analysis) form.append('analysis', analysis);
       setBusy('Uploading');
       onCreated(await api.create(form));
     } catch (e) {
@@ -69,14 +71,19 @@ export function NewSurvey({ onCreated, aiReady }: { onCreated: (p: Project) => v
           <input type="file" accept="video/*" onChange={(e) => setVideo(e.target.files?.[0] ?? null)} />
         </label>
       </div>
+      <label className="col">
+        <span className="small muted">Prepared analysis (optional)</span>
+        <input type="file" accept="application/json,.json" onChange={(e) => setAnalysis(e.target.files?.[0] ?? null)} />
+        <span className="small muted">An analysis.json made from this exact video. The app replays it step by step, labeled with when it was run, and needs no API key.</span>
+      </label>
       <label className="col" style={{ maxWidth: 260 }}>
         <span className="small muted">Components per route</span>
         <input type="number" min={2} max={500} value={capacity} onChange={(e) => setCapacity(Number(e.target.value))} />
         <span className="small muted">About 500 at a real facility. Set it small for a house so the split shows.</span>
       </label>
       <div className="row">
-        <button className="btn" disabled={!survey || !video || Boolean(busy) || !aiReady} onClick={start}>{busy || 'Analyse survey and video'}</button>
-        {!aiReady && <span className="small muted">Needs ANTHROPIC_API_KEY on the server.</span>}
+        <button className="btn" disabled={!survey || !video || Boolean(busy) || (!aiReady && !analysis)} onClick={start}>{busy || (analysis ? 'Replay the prepared analysis' : 'Analyse survey and video')}</button>
+        {!aiReady && !analysis && <span className="small muted">This server has no ANTHROPIC_API_KEY. Add a prepared analysis to replay one.</span>}
       </div>
       {error && <p className="chip bad" role="alert" style={{ whiteSpace: 'normal' }}>{error}</p>}
     </div>
