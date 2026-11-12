@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Project } from '../shared/types';
 import { api, resetStatic, STATIC } from './api';
 import { AskTab, ChecksTab, ReviewTab, RoutesTab, RulesTab, SheetTab } from './tabs';
-import { PlanView, VideoView } from './views';
+import { FramesView, PlanView, VideoView } from './views';
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -146,13 +146,14 @@ export function Workspace({ id, role }: { id: string; role: string }) {
             <span className="small muted">Pins: blue proposed, green confirmed, teal corrected; pink ring difficult to monitor. Diamonds are reference points. Drag a pin to correct its position.</span>
           </div>
           <div className="card col">
-            <h2>Walkthrough video</h2>
-            {p.video ? <VideoView p={p} selected={sel} onSelect={setSelected} /> : <p className="muted">No walkthrough video yet. Components found in the video appear here, on the plan and in review once it is analysed.</p>}
+            <h2>{p.video ? 'Walkthrough video' : 'Walkthrough frames'}</h2>
+            {p.video ? <VideoView p={p} selected={sel} onSelect={setSelected} /> : p.frames.length ? <FramesView p={p} selected={sel} onSelect={setSelected} /> : <p className="muted">No walkthrough video yet. Components found in the video appear here, on the plan and in review once it is analysed.</p>}
             {sel && (
               <div className="col" style={{ gap: 2, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
                 <strong style={{ color: 'var(--brand)' }}>{sel.tag} · {sel.equipmentId} · {sel.equipmentName}</strong>
                 <span>{sel.locationDescription}</span>
-                <span className="small muted">Stand-in for: {sel.householdName} · seen {sel.sightings.length} times</span>
+                <span className="small muted">Stand-in for: {sel.householdName} · {sel.sightings.length ? `seen ${sel.sightings.length} time${sel.sightings.length === 1 ? '' : 's'}` : 'expected but not seen in the video'}</span>
+                <span className="small muted">{sel.confidenceNote}</span>
               </div>
             )}
           </div>

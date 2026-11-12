@@ -107,3 +107,38 @@ export function VideoView({ p, selected, onSelect }: { p: Project; selected: Com
     </div>
   );
 }
+
+/** When only still frames are kept (no video file), show the frame each component was seen in, with its box. */
+export function FramesView({ p, selected, onSelect }: { p: Project; selected: Component | null; onSelect: (id: string) => void }) {
+  const [pick, setPick] = useState(0);
+  const sel = selected?.sightings[0];
+  const idx = sel ? Math.max(0, p.frames.findIndex((f) => f.file === sel.frame)) : pick;
+  const frame = p.frames[idx];
+  const here = p.components.filter((c) => c.status !== 'rejected' && c.sightings.some((s) => s.frame === frame?.file));
+  const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, '0')}`;
+  if (!frame) return <p className="muted">No frames yet.</p>;
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <div className="video-wrap" style={{ background: '#111', display: 'flex', justifyContent: 'center' }}>
+        <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%' }}>
+          <img src={api.file(p.id, frame.file)} alt={`Walkthrough frame at ${fmt(frame.t)}`} style={{ display: 'block', maxWidth: '100%', maxHeight: 420 }} />
+          {here.map((c) => c.sightings.filter((s) => s.frame === frame.file).map((s, i) => (
+            <button key={c.id + i} type="button" title={`${c.tag} ${c.equipmentName}`} aria-label={`Select ${c.tag}`} onClick={() => onSelect(c.id)}
+              className="box" style={{ pointerEvents: 'auto', cursor: 'pointer', background: 'transparent', left: `${s.box.x * 100}%`, top: `${s.box.y * 100}%`, width: `${s.box.w * 100}%`, height: `${s.box.h * 100}%`, borderColor: c.id === selected?.id ? '#e8a04f' : STATUS_COLOR[c.status], borderWidth: c.id === selected?.id ? 4 : 2 }}>
+              <span style={{ position: 'absolute', left: -2, top: -20, background: c.id === selected?.id ? '#e8a04f' : STATUS_COLOR[c.status], color: '#fff', font: '600 11px Inter, sans-serif', padding: '1px 5px', borderRadius: 3, whiteSpace: 'nowrap' }}>{c.tag}</span>
+            </button>
+          )))}
+        </div>
+      </div>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} aria-label="Frames kept from the walkthrough">
+        {p.frames.map((f, i) => (
+          <button key={f.file} type="button" onClick={() => { setPick(i); const c = p.components.find((x) => x.sightings.some((s) => s.frame === f.file)); if (c) onSelect(c.id); }}
+            style={{ padding: 0, border: i === idx ? '2px solid #252d42' : '1px solid var(--line)', borderRadius: 4, background: 'none', cursor: 'pointer' }} title={`Frame at ${fmt(f.t)}`}>
+            <img src={api.file(p.id, f.file)} alt="" style={{ width: 64, height: 64, objectFit: 'cover', display: 'block', borderRadius: 3 }} />
+          </button>
+        ))}
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>Only close crops of each component are kept from the walkthrough; the full video and anything personal are left out. Click a box or a frame to select a component.</p>
+    </div>
+  );
+}
