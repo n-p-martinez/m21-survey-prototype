@@ -34,12 +34,12 @@ writeFileSync(path.join(outDir, 'index.html'), page);
 writeFileSync(path.join(outDir, 'project.json'), JSON.stringify(p));
 cpSync(path.join(projectDir, p.survey!.pageImage), path.join(outDir, 'files', p.survey!.pageImage));
 for (const f of p.frames) cpSync(path.join(projectDir, f.file), path.join(outDir, 'files', f.file));
-const video = path.join(projectDir, p.video!.file);
-if (existsSync(video)) {
+const video = p.video ? path.join(projectDir, p.video.file) : '';
+if (p.video && existsSync(video)) {
   const mb = statSync(video).size / 1024 / 1024;
-  if (mb <= 15) cpSync(video, path.join(outDir, 'files', p.video!.file));
+  if (mb <= 15) cpSync(video, path.join(outDir, 'files', p.video.file));
   else console.warn(`Video is ${mb.toFixed(1)} MB; over the 15 MB per-file limit. Re-encode it smaller with ffmpeg before packaging.`);
 }
 rmSync(build, { recursive: true, force: true });
 const files = readdirSync(path.join(outDir, 'files', 'frames')).length;
-console.log(`Static page in ${outDir}: index.html, project.json, survey image, ${files} frames${existsSync(path.join(outDir, 'files', p.video!.file)) ? ', video' : ''}.`);
+console.log(`Static page in ${outDir}: index.html, project.json, survey image, ${files} frames${p.video && existsSync(path.join(outDir, 'files', p.video.file)) ? ', video' : ', no video yet'}.`);

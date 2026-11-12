@@ -147,7 +147,7 @@ export function Workspace({ id, role }: { id: string; role: string }) {
           </div>
           <div className="card col">
             <h2>Walkthrough video</h2>
-            <VideoView p={p} selected={sel} onSelect={setSelected} />
+            {p.video ? <VideoView p={p} selected={sel} onSelect={setSelected} /> : <p className="muted">No walkthrough video yet. Components found in the video appear here, on the plan and in review once it is analysed.</p>}
             {sel && (
               <div className="col" style={{ gap: 2, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
                 <strong style={{ color: 'var(--brand)' }}>{sel.tag} · {sel.equipmentId} · {sel.equipmentName}</strong>
